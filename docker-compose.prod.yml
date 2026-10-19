@@ -22,6 +22,7 @@ services:
         exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=server.crt -c ssl_key_file=server.key
     volumes:
       - seed_twin_postgres_data:/var/lib/postgresql/data
+      - seed_twin_postgres_tls:/var/lib/postgresql/tls
     networks:
       - seedtwin_private
     healthcheck:
@@ -78,3 +79,4 @@ networks:
 
 volumes:
   seed_twin_postgres_data:
+  seed_twin_postgres_tls:
