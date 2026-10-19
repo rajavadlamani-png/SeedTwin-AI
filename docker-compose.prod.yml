@@ -6,6 +6,17 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
+    # Generate a private self-signed server certificate in the persistent data volume
+    # so production clients can enforce encrypted PostgreSQL connections.
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -s "$PGDATA/server.crt" ] || [ ! -s "$PGDATA/server.key" ]; then
+          openssl req -new -x509 -days 3650 -nodes -text -out "$PGDATA/server.crt" -keyout "$PGDATA/server.key" -subj "/CN=seedtwin-db"
+          chmod 600 "$PGDATA/server.key"
+        fi
+        exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=server.crt -c ssl_key_file=server.key
     volumes:
       - seed_twin_postgres_data:/var/lib/postgresql/data
     networks:
