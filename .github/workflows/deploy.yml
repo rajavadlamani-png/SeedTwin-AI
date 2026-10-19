@@ -31,13 +31,19 @@ jobs:
       - name: Install backend dependencies and lint tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r backend/requirements.txt flake8
+          python -m pip install -r backend/requirements.txt flake8 bandit
 
       - name: Run backend syntax and undefined-name checks
         run: flake8 backend --select=E9,F63,F7,F82 --show-source --statistics
 
+      - name: Run Bandit security checks
+        run: bandit -r backend -ll
+
       - name: Build backend Docker image
         run: docker build --pull --tag seedtwin-ai-backend:${GITHUB_SHA} ./backend
+
+      - name: Build TLS-capable PostgreSQL image
+        run: docker build --pull --tag seedtwin-ai-postgres:15-alpine-tls ./database
 
       - name: Log in to Docker Hub
         if: ${{ vars.ENABLE_DOCKER_HUB_PUSH == 'true' }}
