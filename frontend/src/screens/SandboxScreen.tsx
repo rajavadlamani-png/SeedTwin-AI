@@ -161,9 +161,13 @@ export default function SandboxScreen() {
     if (!API_BASE_URL) {
       setError("Set EXPO_PUBLIC_API_URL to the reachable FastAPI server URL.");
       setSimulationLoading(false);
+      setWeatherSyncLoading(false);
       return;
     }
-    if (!selectedCrop || !cropCatalog.some((crop) => crop.crop_name === selectedCrop)) return;
+    if (!selectedCrop || !cropCatalog.some((crop) => crop.crop_name === selectedCrop)) {
+      setWeatherSyncLoading(false);
+      return;
+    }
 
     setSimulationLoading(true);
     setError(null);
