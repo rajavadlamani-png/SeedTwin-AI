@@ -15,11 +15,12 @@ services:
       - sh
       - -c
       - |
-        if [ ! -s "$PGDATA/server.crt" ] || [ ! -s "$PGDATA/server.key" ]; then
-          openssl req -new -x509 -days 3650 -nodes -text -out "$PGDATA/server.crt" -keyout "$PGDATA/server.key" -subj "/CN=seedtwin-db"
-          chmod 600 "$PGDATA/server.key"
+        if [ ! -s /var/lib/postgresql/tls/server.crt ] || [ ! -s /var/lib/postgresql/tls/server.key ]; then
+          openssl req -new -x509 -days 3650 -nodes -text -out /var/lib/postgresql/tls/server.crt -keyout /var/lib/postgresql/tls/server.key -subj "/CN=seedtwin-db"
+          chown postgres:postgres /var/lib/postgresql/tls/server.crt /var/lib/postgresql/tls/server.key
+          chmod 600 /var/lib/postgresql/tls/server.key
         fi
-        exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=server.crt -c ssl_key_file=server.key
+        exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/var/lib/postgresql/tls/server.crt -c ssl_key_file=/var/lib/postgresql/tls/server.key
     volumes:
       - seed_twin_postgres_data:/var/lib/postgresql/data
       - seed_twin_postgres_tls:/var/lib/postgresql/tls
