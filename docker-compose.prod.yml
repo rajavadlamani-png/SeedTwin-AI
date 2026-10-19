@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
-    # Generate a private self-signed server certificate in the persistent data volume
+    # Generate a private self-signed server certificate in the separate TLS volume
     # so production clients can enforce encrypted PostgreSQL connections.
     command:
       - sh
