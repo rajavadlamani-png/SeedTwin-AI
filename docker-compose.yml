@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: seed_admin
+      POSTGRES_PASSWORD: seed_secure_pass
+      POSTGRES_DB: seed_twin_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - seed_twin_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seed_admin -d seed_twin_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://seed_admin:seed_secure_pass@db:5432/seed_twin_db
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  seed_twin_postgres_data:
