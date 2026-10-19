@@ -5,22 +5,38 @@ Micro-climate digital twin simulation sandbox for the seed industry.
 ## Repository structure
 
 - `backend/app/database/models.py`: PostgreSQL configuration and SQLAlchemy ORM models.
-- `backend/app/database/seed.py`: creates tables and inserts the demonstration variety catalog.
+- `backend/app/database/seed_data.py`: seeds the four-variety catalog on API startup when the table is empty.
 - `backend/app/api/v1/simulation_engine.py`: deterministic simulation calculation.
 - `backend/app/api/v1/endpoints.py`: versioned FastAPI simulation routes.
 - `frontend/src/screens/SandboxScreen.tsx`: Expo sandbox interface.
+- `docker-compose.yml`: PostgreSQL and FastAPI local deployment.
 
-## Backend setup
+## Run with Docker Compose
+
+From the repository root, run:
+
+```bash
+docker compose up --build
+```
+
+Compose starts PostgreSQL 15 and waits for its health check before starting FastAPI. The backend connects to `postgresql://seed_admin:seed_secure_pass@db:5432/seed_twin_db`; the database is persisted in the `seed_twin_postgres_data` volume. On first startup, the API creates the ORM tables and seeds the four requested varieties if `seed_varieties` is empty.
+
+- API: http://localhost:8000
+- OpenAPI documentation: http://localhost:8000/docs
+- Health endpoint: http://localhost:8000/health
+
+The PostgreSQL port is exposed on `localhost:5432` for local database tools. The compose credentials are intended for local development; replace them with managed secrets before deploying to a shared or public environment.
+
+## Run the backend without Docker
 
 Use Python 3.11 or newer and PostgreSQL 14 or newer.
 
-1. Create a PostgreSQL database named `seedtwin_ai`.
+1. Create a PostgreSQL database named `seed_twin_db` with user `seed_admin` and password `seed_secure_pass`.
 2. From `backend/`, install dependencies with `pip install -r requirements.txt`.
-3. Set `DATABASE_URL` to a SQLAlchemy PostgreSQL URL, for example `postgresql+psycopg2://postgres:password@localhost:5432/seedtwin_ai`.
-4. Run `python -m app.database.seed` from `backend/` to create the tables and insert the demonstration varieties.
-5. Run `uvicorn main:app --reload --host 0.0.0.0 --port 8000` from `backend/`.
+3. Set `DATABASE_URL` to `postgresql+psycopg2://seed_admin:seed_secure_pass@localhost:5432/seed_twin_db`.
+4. Run `uvicorn main:app --reload --host 0.0.0.0 --port 8000` from `backend/`. Startup creates tables and seeds the catalog if empty.
 
-The API documentation is available at `/docs`. The simulation endpoint is `POST /api/v1/simulate-twin`.
+The simulation endpoint is `POST /api/v1/simulate-twin`.
 
 ## Frontend setup
 
