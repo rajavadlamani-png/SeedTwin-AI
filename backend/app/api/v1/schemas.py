@@ -18,3 +18,16 @@ class SimulationResult(BaseModel):
     calculated_loss_percentage: float
     dominant_risk_factor: str
     simulation_run_id: int
+
+
+class CropCatalogItem(BaseModel):
+    id: int
+    crop_name: str
+    hybrid_code: str
+    base_yield_kg_per_acre: float
+    min_temp_c: float
+    max_temp_c: float
+    heat_resilience_factor: float
+    drought_resilience_factor: float
+    disease_resistance_factor: float
+    pest_resistance_factor: float
