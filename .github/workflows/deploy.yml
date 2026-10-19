@@ -1,0 +1,64 @@
+name: SeedTwin AI CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - feature/production-architecture
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seedtwin-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-build:
+    name: Validate backend and build image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies and lint tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt flake8
+
+      - name: Run backend syntax and undefined-name checks
+        run: flake8 backend --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Build backend Docker image
+        run: docker build --pull --tag seedtwin-ai-backend:${GITHUB_SHA} ./backend
+
+      - name: Log in to Docker Hub
+        if: ${{ vars.ENABLE_DOCKER_HUB_PUSH == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Tag image for Docker Hub
+        if: ${{ vars.ENABLE_DOCKER_HUB_PUSH == 'true' }}
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+        run: |
+          test -n "$DOCKER_HUB_USERNAME"
+          docker tag "seedtwin-ai-backend:${GITHUB_SHA}" "${DOCKER_HUB_USERNAME}/seedtwin-ai-backend:${GITHUB_SHA}"
+          docker tag "seedtwin-ai-backend:${GITHUB_SHA}" "${DOCKER_HUB_USERNAME}/seedtwin-ai-backend:latest"
+
+      - name: Push image to Docker Hub
+        if: ${{ vars.ENABLE_DOCKER_HUB_PUSH == 'true' }}
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+        run: |
+          docker push "${DOCKER_HUB_USERNAME}/seedtwin-ai-backend:${GITHUB_SHA}"
+          docker push "${DOCKER_HUB_USERNAME}/seedtwin-ai-backend:latest"
