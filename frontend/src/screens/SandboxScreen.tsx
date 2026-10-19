@@ -5,10 +5,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Slider from "@react-native-community/slider";
+import { LineChart } from "react-native-chart-kit";
 
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 
@@ -31,7 +34,28 @@ type SimulationResult = {
   calculated_loss_percentage: number;
   dominant_risk_factor: "Climate" | "Biological" | "Quality" | "Optimal";
   simulation_run_id: number;
+  daily_health_history: DailyHealthPoint[];
+  temp_slider_shift: number;
+  water_slider_pct: number;
+  weather_summary: WeatherSummary | null;
 };
+
+type DailyHealthPoint = {
+  lifecycle_day: number;
+  milestone: "Sowing" | "Vegetative" | "Flowering" | "Maturity" | string;
+  health_percentage: number;
+};
+
+type WeatherSummary = {
+  latitude: number;
+  longitude: number;
+  average_max_temperature_c: number;
+  total_precipitation_mm: number;
+  days_included: number;
+  daily_dates: string[];
+};
+
+type SyncedCoordinates = { latitude: number; longitude: number };
 
 type SliderControlProps = {
   title: string;
@@ -78,6 +102,11 @@ export default function SandboxScreen() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [latitudeInput, setLatitudeInput] = useState("");
+  const [longitudeInput, setLongitudeInput] = useState("");
+  const [syncedCoordinates, setSyncedCoordinates] = useState<SyncedCoordinates | null>(null);
+  const [weatherSyncLoading, setWeatherSyncLoading] = useState(false);
+  const { width: windowWidth } = useWindowDimensions();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -142,7 +171,10 @@ export default function SandboxScreen() {
       const activeCrop = cropCatalog.find((crop) => crop.crop_name === selectedCrop);
       if (!activeCrop) throw new Error("The selected crop is no longer in the catalog.");
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/simulate-twin`, {
+      const weatherQuery = syncedCoordinates
+        ? `?lat=${encodeURIComponent(String(syncedCoordinates.latitude))}&lon=${encodeURIComponent(String(syncedCoordinates.longitude))}`
+        : "";
+      const response = await fetch(`${API_BASE_URL}/api/v1/simulate-twin${weatherQuery}`, {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -164,17 +196,30 @@ export default function SandboxScreen() {
       if (
         typeof result.final_yield_kg_per_acre !== "number" ||
         typeof result.calculated_loss_percentage !== "number" ||
-        !["Climate", "Biological", "Quality", "Optimal"].includes(result.dominant_risk_factor)
+        !["Climate", "Biological", "Quality", "Optimal"].includes(result.dominant_risk_factor) ||
+        !Array.isArray(result.daily_health_history) ||
+        typeof result.temp_slider_shift !== "number" ||
+        typeof result.water_slider_pct !== "number"
       ) {
         throw new Error("The API returned an invalid simulation result.");
       }
-      if (!signal.aborted) setSimulationResult(result);
+      if (!signal.aborted) {
+        setSimulationResult(result);
+        if (result.weather_summary) {
+          setTempShift(result.temp_slider_shift);
+          setWaterAdjust(result.water_slider_pct);
+          setWeatherSyncLoading(false);
+        }
+      }
     } catch (err) {
-      if (!signal.aborted) setError(err instanceof Error ? err.message : "Unable to retrieve simulation results.");
+      if (!signal.aborted) {
+        setError(err instanceof Error ? err.message : "Unable to retrieve simulation results.");
+        setWeatherSyncLoading(false);
+      }
     } finally {
       if (!signal.aborted) setSimulationLoading(false);
     }
-  }, [cropCatalog, selectedCrop, tempShift, waterAdjust, pestPressure, diseasePressure, germinationRate]);
+  }, [cropCatalog, selectedCrop, tempShift, waterAdjust, pestPressure, diseasePressure, germinationRate, syncedCoordinates]);
 
   useEffect(() => {
     if (isLoading || !selectedCrop || catalogError) return;
@@ -186,6 +231,19 @@ export default function SandboxScreen() {
     };
   }, [fetchSimulationData, refreshKey, isLoading, selectedCrop, catalogError]);
 
+  const syncLocalFieldWeather = () => {
+    const latitude = Number(latitudeInput.trim());
+    const longitude = Number(longitudeInput.trim());
+    if (!latitudeInput.trim() || !longitudeInput.trim() || !Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      setError("Enter a valid latitude (-90 to 90) and longitude (-180 to 180).");
+      return;
+    }
+    setError(null);
+    setWeatherSyncLoading(true);
+    setSyncedCoordinates({ latitude, longitude });
+    setRefreshKey((value) => value + 1);
+  };
+
   const resetSimulation = () => {
     if (cropCatalog.length > 0) setSelectedCrop(cropCatalog[0].crop_name);
     setTempShift(0);
@@ -193,9 +251,15 @@ export default function SandboxScreen() {
     setPestPressure(0);
     setDiseasePressure(0);
     setGerminationRate(95);
+    setSyncedCoordinates(null);
+    setWeatherSyncLoading(false);
   };
 
   const activeCrop = cropCatalog.find((crop) => crop.crop_name === selectedCrop);
+  const finalHealthIndex = simulationResult ? Math.max(0, Math.min(100, 100 - simulationResult.calculated_loss_percentage)) : null;
+  const chartColor = finalHealthIndex === null ? "#287A55" : finalHealthIndex > 80 ? "#20A464" : finalHealthIndex >= 50 ? "#E58A20" : "#D64545";
+  const chartRgb = chartColor === "#20A464" ? "32,164,100" : chartColor === "#E58A20" ? "229,138,32" : chartColor === "#D64545" ? "214,69,69" : "40,122,85";
+  const chartWidth = Math.max(280, windowWidth - 64);
   const riskColor = simulationResult?.dominant_risk_factor === "Optimal"
     ? "#287A55"
     : simulationResult?.dominant_risk_factor === "Quality"
@@ -236,6 +300,77 @@ export default function SandboxScreen() {
               {!catalogError && <Pressable onPress={() => setRefreshKey((value) => value + 1)} style={styles.retryButton}><Text style={styles.retryText}>Retry simulation</Text></Pressable>}
             </View>
           )}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Lifecycle Health Projection</Text>
+          <Text style={styles.sectionDescription}>Simulated plant-health index across four growth milestones. The curve is a scenario projection, not observed field telemetry.</Text>
+          {simulationResult && simulationResult.daily_health_history.length > 0 ? (
+            <LineChart
+              data={{
+                labels: simulationResult.daily_health_history.map((point) => point.milestone),
+                datasets: [
+                  {
+                    data: simulationResult.daily_health_history.map((point) => Math.max(0, Math.min(100, point.health_percentage))),
+                    color: (opacity = 1) => `rgba(${chartRgb}, ${opacity})`,
+                    strokeWidth: 3,
+                  },
+                  {
+                    data: simulationResult.daily_health_history.map(() => 100),
+                    color: () => "rgba(0,0,0,0)",
+                    strokeWidth: 0,
+                    withDots: false,
+                  },
+                ],
+                legend: [],
+              }}
+              width={chartWidth}
+              height={230}
+              fromZero
+              segments={4}
+              yAxisSuffix="%"
+              yAxisInterval={1}
+              withInnerLines
+              withOuterLines={false}
+              withDots
+              withShadow={false}
+              bezier
+              chartConfig={{
+                backgroundColor: "#FFFFFF",
+                backgroundGradientFrom: "#FFFFFF",
+                backgroundGradientTo: "#FFFFFF",
+                decimalPlaces: 0,
+                color: (opacity = 1) => `rgba(55, 75, 62, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(93, 109, 98, ${opacity})`,
+                propsForBackgroundLines: { stroke: "#E7EEE8", strokeDasharray: "4 5" },
+                propsForDots: { r: "4", strokeWidth: "2", stroke: chartColor },
+              }}
+              style={styles.chart}
+              accessibilityLabel="Simulated plant health from sowing to maturity"
+            />
+          ) : (
+            <View style={styles.chartPlaceholder}><Text style={styles.chartPlaceholderText}>The lifecycle chart will appear when simulation data is available.</Text></View>
+          )}
+          {simulationResult && <Text style={[styles.chartSummary, { color: chartColor }]}>Final health index: {finalHealthIndex?.toFixed(1)}% · {finalHealthIndex !== null && finalHealthIndex > 80 ? "Healthy" : finalHealthIndex !== null && finalHealthIndex >= 50 ? "Watch" : "Stressed"}</Text>}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Sync Local Field Weather</Text>
+          <Text style={styles.sectionDescription}>Fetch the previous seven days of local maximum temperature and rainfall from Open-Meteo, then use them as the simulation climate baseline.</Text>
+          <View style={styles.coordinateRow}>
+            <View style={styles.coordinateField}>
+              <Text style={styles.inputLabel}>Latitude</Text>
+              <TextInput value={latitudeInput} onChangeText={setLatitudeInput} keyboardType="numbers-and-punctuation" placeholder="17.3850" placeholderTextColor="#9AA69D" style={styles.coordinateInput} accessibilityLabel="Field latitude" />
+            </View>
+            <View style={styles.coordinateField}>
+              <Text style={styles.inputLabel}>Longitude</Text>
+              <TextInput value={longitudeInput} onChangeText={setLongitudeInput} keyboardType="numbers-and-punctuation" placeholder="78.4867" placeholderTextColor="#9AA69D" style={styles.coordinateInput} accessibilityLabel="Field longitude" />
+            </View>
+          </View>
+          <Pressable accessibilityRole="button" disabled={weatherSyncLoading || simulationLoading} onPress={syncLocalFieldWeather} style={[styles.syncButton, (weatherSyncLoading || simulationLoading) && styles.syncButtonDisabled]}>
+            {weatherSyncLoading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.syncButtonText}>Sync Local Field Weather</Text>}
+          </Pressable>
+          {simulationResult?.weather_summary && <Text style={styles.weatherSummary}>Last sync: {simulationResult.weather_summary.average_max_temperature_c.toFixed(1)}°C average max · {simulationResult.weather_summary.total_precipitation_mm.toFixed(1)} mm total rain ({simulationResult.weather_summary.days_included} daily records)</Text>}
         </View>
 
         <View style={styles.section}>
@@ -335,6 +470,18 @@ const styles = StyleSheet.create({
   varietyNameSelected: { color: "#1F603F" },
   varietyDescription: { color: "#7B887F", fontSize: 11, marginTop: 5 },
   card: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E0E9E1", borderRadius: 18, padding: 16, marginBottom: 18 },
+  chart: { borderRadius: 14, marginLeft: -8 },
+  chartPlaceholder: { minHeight: 150, borderRadius: 12, backgroundColor: "#F8FAF8", alignItems: "center", justifyContent: "center", padding: 20 },
+  chartPlaceholderText: { color: "#748177", fontSize: 12, textAlign: "center", lineHeight: 18 },
+  chartSummary: { fontSize: 13, fontWeight: "800", marginTop: 8 },
+  coordinateRow: { flexDirection: "row", gap: 12 },
+  coordinateField: { flex: 1 },
+  inputLabel: { color: "#435348", fontSize: 12, fontWeight: "700", marginBottom: 7 },
+  coordinateInput: { backgroundColor: "#F8FAF8", borderWidth: 1, borderColor: "#DCE6DD", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, color: "#25392D", fontSize: 14 },
+  syncButton: { backgroundColor: "#287A55", borderRadius: 11, paddingVertical: 13, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", marginTop: 14, minHeight: 44 },
+  syncButtonDisabled: { opacity: 0.65 },
+  syncButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
+  weatherSummary: { color: "#52675A", fontSize: 12, lineHeight: 18, marginTop: 12 },
   resilienceGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   resilienceItem: { width: "47%", backgroundColor: "#F8FAF8", borderRadius: 12, padding: 12 },
   resilienceValue: { color: "#287A55", fontSize: 18, fontWeight: "800", marginTop: 6 },
