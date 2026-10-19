@@ -10,7 +10,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship,
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg2://postgres:postgres@localhost:5432/seedtwin_ai",
+    "postgresql+psycopg2://seed_admin:seed_secure_pass@localhost:5432/seed_twin_db",
 )
 
 engine: Engine = create_engine(DATABASE_URL, pool_pre_ping=True)
