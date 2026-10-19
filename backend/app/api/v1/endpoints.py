@@ -64,3 +64,32 @@ def simulate_twin(
         dominant_risk_factor=str(result["dominant_risk_factor"]),
         simulation_run_id=run.id,
     )
+
+import re
+
+from app.api.v1.schemas import CropCatalogItem
+
+
+@router.get("/crops", response_model=list[CropCatalogItem])
+def list_crops(db: Session = Depends(get_db)) -> list[CropCatalogItem]:
+    """Return database-backed crop profiles for the mobile selector."""
+    varieties = db.scalars(select(SeedVariety).order_by(SeedVariety.id)).all()
+    catalog: list[CropCatalogItem] = []
+    for variety in varieties:
+        match = re.search(r"\(([^()]+)\)\s*$", variety.crop_name)
+        hybrid_code = match.group(1) if match else variety.crop_name
+        catalog.append(
+            CropCatalogItem(
+                id=variety.id,
+                crop_name=variety.crop_name,
+                hybrid_code=hybrid_code,
+                base_yield_kg_per_acre=float(variety.base_yield_kg_per_acre),
+                min_temp_c=float(variety.min_temp_c),
+                max_temp_c=float(variety.max_temp_c),
+                heat_resilience_factor=float(variety.heat_resilience_factor),
+                drought_resilience_factor=float(variety.drought_resilience_factor),
+                disease_resistance_factor=float(variety.disease_resistance_factor),
+                pest_resistance_factor=float(variety.pest_resistance_factor),
+            )
+        )
+    return catalog
