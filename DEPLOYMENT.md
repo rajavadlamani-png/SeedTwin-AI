@@ -14,7 +14,7 @@ Use a database password safe for the URL format or percent-encode reserved chara
 
 ## TLS certificate prerequisite
 
-Before starting the production stack, place a valid certificate chain at `certs/fullchain.pem` and its matching private key at `certs/privkey.pem`. Keep the private key restricted to the deployment operator. The Nginx configuration redirects HTTP traffic to HTTPS and terminates TLS on port 443. The included ACME challenge location is a hook for an external certificate renewal process; certificate issuance and renewal are not automated by this stack.
+Before starting the production stack, place a valid certificate chain at `certs/fullchain.pem` and its matching private key at `certs/privkey.pem`. Keep the private key restricted to the deployment operator. The Nginx configuration redirects HTTP traffic to HTTPS and terminates TLS on port 443. The included ACME challenge location is mounted at `./certbot/www` for an external certificate issuance/renewal process. Certificate issuance and renewal are not automated by this stack.
 
 ## Start the production stack
 
@@ -37,5 +37,5 @@ The workflow publishes a commit-SHA tag and `latest`. For production rollouts, p
 ## Notes
 
 - Production `DATABASE_URL` must use PostgreSQL. The application enforces `sslmode=require` and bounded SQLAlchemy connection-pool settings when `ENV=production`.
-- The bundled PostgreSQL image is built from `database/Dockerfile` and includes OpenSSL. On first startup it creates a self-signed TLS certificate inside the persistent database volume; `sslmode=require` encrypts connections but does not validate the server certificate identity. For stronger identity verification, replace this bootstrap certificate with a certificate from your internal CA and use `sslmode=verify-full` with a trusted CA.
+- The bundled PostgreSQL image is built from `database/Dockerfile` and includes OpenSSL. On first startup it creates a self-signed TLS certificate inside a separate persistent TLS volume; `sslmode=require` encrypts connections but does not validate the server certificate identity. For stronger identity verification, replace this bootstrap certificate with a certificate from your internal CA and use `sslmode=verify-full` with a trusted CA.
 - Configure cloud firewall rules to expose only the reverse proxy and restrict SSH/administration separately.
