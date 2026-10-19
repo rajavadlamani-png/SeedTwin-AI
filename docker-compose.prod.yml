@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:15-alpine
+    image: seedtwin-ai-postgres:15-alpine-tls
+    build:
+      context: ./database
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}
