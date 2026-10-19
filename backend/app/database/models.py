@@ -4,11 +4,9 @@ from decimal import Decimal
 from typing import Generator
 
 from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, create_engine, func
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
-
-from sqlalchemy.engine import make_url
 
 
 def _database_configuration() -> tuple[str, dict[str, int | bool]]:
