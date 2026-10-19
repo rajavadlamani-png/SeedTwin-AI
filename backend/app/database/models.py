@@ -8,12 +8,48 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://seed_admin:seed_secure_pass@localhost:5432/seed_twin_db",
-)
+from sqlalchemy.engine import make_url
 
-engine: Engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+def _database_configuration() -> tuple[str, dict[str, int | bool]]:
+    raw_database_url = os.getenv("DATABASE_URL")
+    if not raw_database_url:
+        raise RuntimeError(
+            "DATABASE_URL must be configured explicitly; no default credentials are provided."
+        )
+
+    is_production = os.getenv("ENV", "development").strip().lower() == "production"
+    engine_options: dict[str, int | bool] = {"pool_pre_ping": True}
+
+    if is_production:
+        try:
+            parsed_url = make_url(raw_database_url)
+        except Exception as exc:
+            raise RuntimeError("DATABASE_URL is not a valid SQLAlchemy URL.") from exc
+
+        if parsed_url.get_backend_name() != "postgresql":
+            raise RuntimeError("Production DATABASE_URL must use PostgreSQL.")
+
+        # Enforce TLS regardless of whether a caller supplied an SSL query option.
+        secure_query = dict(parsed_url.query)
+        secure_query["sslmode"] = "require"
+        raw_database_url = parsed_url.set(query=secure_query).render_as_string(
+            hide_password=False
+        )
+        engine_options.update(
+            {
+                "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
+                "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "10")),
+                "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", "30")),
+                "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", "1800")),
+            }
+        )
+
+    return raw_database_url, engine_options
+
+
+DATABASE_URL, _ENGINE_OPTIONS = _database_configuration()
+engine: Engine = create_engine(DATABASE_URL, **_ENGINE_OPTIONS)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
