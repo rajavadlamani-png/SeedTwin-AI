@@ -25,7 +25,7 @@ services:
       - seed_twin_postgres_data:/var/lib/postgresql/data
       - seed_twin_postgres_tls:/var/lib/postgresql/tls
     networks:
-      - seedtwin_private
+      - backend_db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
@@ -49,7 +49,8 @@ services:
       db:
         condition: service_healthy
     networks:
-      - seedtwin_private
+      - backend_db
+      - proxy_backend
     expose:
       - "8000"
     security_opt:
@@ -71,12 +72,15 @@ services:
       - ./certs:/etc/nginx/certs:ro
       - ./certbot/www:/var/www/certbot:ro
     networks:
-      - seedtwin_private
+      - proxy_backend
     security_opt:
       - no-new-privileges:true
 
 networks:
-  seedtwin_private:
+  backend_db:
+    driver: bridge
+    internal: true
+  proxy_backend:
     driver: bridge
 
 volumes:
