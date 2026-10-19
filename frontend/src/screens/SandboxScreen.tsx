@@ -11,9 +11,20 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Slider from "@react-native-community/slider";
 
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? "").replace(/\/$/, "");
-const VARIETIES = ["Standard-Corn-Hybrid", "ClimateGuard-BioCorn-V2"] as const;
 
-type CropVariety = (typeof VARIETIES)[number];
+type CropCatalogItem = {
+  id: number;
+  crop_name: string;
+  hybrid_code: string;
+  base_yield_kg_per_acre: number;
+  min_temp_c: number;
+  max_temp_c: number;
+  heat_resilience_factor: number;
+  drought_resilience_factor: number;
+  disease_resistance_factor: number;
+  pest_resistance_factor: number;
+};
+
 type SimulationResult = {
   crop_name: string;
   final_yield_kg_per_acre: number;
@@ -49,33 +60,93 @@ function SliderControl({ title, value, minimumValue, maximumValue, step, unit, o
   );
 }
 
+function resiliencePercent(value: number): string {
+  return `${(value * 100).toFixed(0)}%`;
+}
+
 export default function SandboxScreen() {
-  const [selectedCrop, setSelectedCrop] = useState<CropVariety>("Standard-Corn-Hybrid");
+  const [cropCatalog, setCropCatalog] = useState<CropCatalogItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedCrop, setSelectedCrop] = useState("");
   const [tempShift, setTempShift] = useState(0);
   const [waterAdjust, setWaterAdjust] = useState(0);
   const [pestPressure, setPestPressure] = useState(0);
   const [diseasePressure, setDiseasePressure] = useState(0);
   const [germinationRate, setGerminationRate] = useState(95);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [simulationLoading, setSimulationLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function fetchAvailableCrops() {
+      setIsLoading(true);
+      setCatalogError(null);
+      if (!API_BASE_URL) {
+        setCatalogError("Set EXPO_PUBLIC_API_URL to the reachable FastAPI server URL.");
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/crops`, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Crop catalog request failed (${response.status}): ${await response.text()}`);
+        }
+
+        const catalog: CropCatalogItem[] = await response.json();
+        if (!Array.isArray(catalog) || catalog.some((crop) =>
+          typeof crop.crop_name !== "string" || typeof crop.hybrid_code !== "string"
+        )) {
+          throw new Error("The API returned an invalid crop catalog.");
+        }
+
+        if (!controller.signal.aborted) {
+          setCropCatalog(catalog);
+          setSelectedCrop((current) =>
+            catalog.some((crop) => crop.crop_name === current)
+              ? current
+              : (catalog[0]?.crop_name ?? "")
+          );
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setCatalogError(err instanceof Error ? err.message : "Unable to load crop catalog.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsLoading(false);
+      }
+    }
+
+    void fetchAvailableCrops();
+    return () => controller.abort();
+  }, []);
 
   const fetchSimulationData = useCallback(async (signal: AbortSignal) => {
     if (!API_BASE_URL) {
       setError("Set EXPO_PUBLIC_API_URL to the reachable FastAPI server URL.");
-      setLoading(false);
+      setSimulationLoading(false);
       return;
     }
+    if (!selectedCrop || !cropCatalog.some((crop) => crop.crop_name === selectedCrop)) return;
 
-    setLoading(true);
+    setSimulationLoading(true);
     setError(null);
     try {
+      const activeCrop = cropCatalog.find((crop) => crop.crop_name === selectedCrop);
+      if (!activeCrop) throw new Error("The selected crop is no longer in the catalog.");
+
       const response = await fetch(`${API_BASE_URL}/api/v1/simulate-twin`, {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({
-          crop_name: selectedCrop,
+          crop_name: activeCrop.crop_name,
           temp_slider_shift: tempShift,
           water_slider_pct: waterAdjust,
           pest_pressure_pct: pestPressure,
@@ -101,21 +172,22 @@ export default function SandboxScreen() {
     } catch (err) {
       if (!signal.aborted) setError(err instanceof Error ? err.message : "Unable to retrieve simulation results.");
     } finally {
-      if (!signal.aborted) setLoading(false);
+      if (!signal.aborted) setSimulationLoading(false);
     }
-  }, [selectedCrop, tempShift, waterAdjust, pestPressure, diseasePressure, germinationRate]);
+  }, [cropCatalog, selectedCrop, tempShift, waterAdjust, pestPressure, diseasePressure, germinationRate]);
 
   useEffect(() => {
+    if (isLoading || !selectedCrop || catalogError) return;
     const controller = new AbortController();
     const timer = setTimeout(() => void fetchSimulationData(controller.signal), 300);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [fetchSimulationData, refreshKey]);
+  }, [fetchSimulationData, refreshKey, isLoading, selectedCrop, catalogError]);
 
   const resetSimulation = () => {
-    setSelectedCrop("Standard-Corn-Hybrid");
+    if (cropCatalog.length > 0) setSelectedCrop(cropCatalog[0].crop_name);
     setTempShift(0);
     setWaterAdjust(0);
     setPestPressure(0);
@@ -123,6 +195,7 @@ export default function SandboxScreen() {
     setGerminationRate(95);
   };
 
+  const activeCrop = cropCatalog.find((crop) => crop.crop_name === selectedCrop);
   const riskColor = simulationResult?.dominant_risk_factor === "Optimal"
     ? "#287A55"
     : simulationResult?.dominant_risk_factor === "Quality"
@@ -156,33 +229,46 @@ export default function SandboxScreen() {
               <Text style={styles.lossValue}>{simulationResult ? `${simulationResult.calculated_loss_percentage.toFixed(2)}%` : "—"}</Text>
             </View>
           </View>
-          {loading && <View style={styles.loadingRow}><ActivityIndicator color="#287A55" size="small" /><Text style={styles.loadingText}>Updating simulation...</Text></View>}
-          {error && (
+          {simulationLoading && <View style={styles.loadingRow}><ActivityIndicator color="#287A55" size="small" /><Text style={styles.loadingText}>Updating simulation...</Text></View>}
+          {(catalogError || error) && (
             <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-              <Pressable onPress={() => setRefreshKey((value) => value + 1)} style={styles.retryButton}>
-                <Text style={styles.retryText}>Retry simulation</Text>
-              </Pressable>
+              <Text style={styles.errorText}>{catalogError ?? error}</Text>
+              {!catalogError && <Pressable onPress={() => setRefreshKey((value) => value + 1)} style={styles.retryButton}><Text style={styles.retryText}>Retry simulation</Text></Pressable>}
             </View>
           )}
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>GENETIC PROFILE</Text>
-          <Text style={styles.sectionDescription}>Choose the variety whose resilience traits drive the simulation.</Text>
-          {VARIETIES.map((variety) => {
-            const selected = selectedCrop === variety;
+          <Text style={styles.sectionDescription}>Crop varieties are loaded live from the database-backed API catalog.</Text>
+          {isLoading && <View style={styles.loadingRow}><ActivityIndicator color="#287A55" size="small" /><Text style={styles.loadingText}>Loading crop catalog...</Text></View>}
+          {!isLoading && cropCatalog.map((crop) => {
+            const selected = selectedCrop === crop.crop_name;
             return (
-              <Pressable key={variety} accessibilityRole="radio" accessibilityState={{ selected }} onPress={() => setSelectedCrop(variety)} style={[styles.varietyButton, selected && styles.varietyButtonSelected]}>
+              <Pressable key={crop.id} accessibilityRole="radio" accessibilityState={{ selected }} onPress={() => setSelectedCrop(crop.crop_name)} style={[styles.varietyButton, selected && styles.varietyButtonSelected]}>
                 <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>{selected && <View style={styles.radioInner} />}</View>
                 <View style={styles.varietyTextContainer}>
-                  <Text style={[styles.varietyName, selected && styles.varietyNameSelected]}>{variety}</Text>
-                  <Text style={styles.varietyDescription}>{variety === "Standard-Corn-Hybrid" ? "Standard resilience profile" : "Enhanced climate resilience profile"}</Text>
+                  <Text style={[styles.varietyName, selected && styles.varietyNameSelected]}>{crop.crop_name}</Text>
+                  <Text style={styles.varietyDescription}>Hybrid code: {crop.hybrid_code} · Base yield: {crop.base_yield_kg_per_acre.toLocaleString("en-IN")} kg/acre</Text>
                 </View>
               </Pressable>
             );
           })}
+          {!isLoading && !catalogError && cropCatalog.length === 0 && <Text style={styles.errorText}>No crop varieties are available in the database.</Text>}
         </View>
+
+        {activeCrop && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Base Genetic Resilience</Text>
+            <Text style={styles.sectionDescription}>Reference coefficients for {activeCrop.hybrid_code}; values are shown as percentages.</Text>
+            <View style={styles.resilienceGrid}>
+              <View style={styles.resilienceItem}><Text style={styles.smallLabel}>Heat resilience</Text><Text style={styles.resilienceValue}>{resiliencePercent(activeCrop.heat_resilience_factor)}</Text></View>
+              <View style={styles.resilienceItem}><Text style={styles.smallLabel}>Drought resilience</Text><Text style={styles.resilienceValue}>{resiliencePercent(activeCrop.drought_resilience_factor)}</Text></View>
+              <View style={styles.resilienceItem}><Text style={styles.smallLabel}>Disease resistance</Text><Text style={styles.resilienceValue}>{resiliencePercent(activeCrop.disease_resistance_factor)}</Text></View>
+              <View style={styles.resilienceItem}><Text style={styles.smallLabel}>Pest resistance</Text><Text style={styles.resilienceValue}>{resiliencePercent(activeCrop.pest_resistance_factor)}</Text></View>
+            </View>
+          </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Environmental Factors</Text>
@@ -249,7 +335,9 @@ const styles = StyleSheet.create({
   varietyNameSelected: { color: "#1F603F" },
   varietyDescription: { color: "#7B887F", fontSize: 11, marginTop: 5 },
   card: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E0E9E1", borderRadius: 18, padding: 16, marginBottom: 18 },
-  cardTitle: { color: "#244C36", fontSize: 17, fontWeight: "800", marginBottom: 2 },
+  resilienceGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  resilienceItem: { width: "47%", backgroundColor: "#F8FAF8", borderRadius: 12, padding: 12 },
+  resilienceValue: { color: "#287A55", fontSize: 18, fontWeight: "800", marginTop: 6 },
   control: { backgroundColor: "#F8FAF8", borderWidth: 1, borderColor: "#E7EEE8", borderRadius: 14, padding: 15, marginBottom: 12 },
   controlHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 },
   controlTitle: { color: "#344B3A", fontSize: 13, fontWeight: "700", flex: 1 },
